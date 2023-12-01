@@ -47,7 +47,7 @@ def new_csv_file_entry():
     return {'file': csv_f, 'writer': writer}
 
 
-def persist_lines(config, lines):
+def persist_lines(target_config, lines):
     state = None
     schemas = {}
     key_properties = {}
@@ -57,9 +57,7 @@ def persist_lines(config, lines):
     row_count = {}
     stream_to_sync = {}
     primary_key_exists = {}
-    batch_size = config['batch_size'] if 'batch_size' in config else 100000
-
-    now = datetime.now().strftime('%Y%m%dT%H%M%S')
+    batch_size = target_config['batch_size'] if 'batch_size' in target_config else 100000
 
     # Loop over lines from stdin
     for line in lines:
@@ -126,7 +124,7 @@ def persist_lines(config, lines):
                 if 'key_properties' not in o:
                     raise Exception("key_properties field is required")
                 key_properties[stream] = o['key_properties']
-                stream_to_sync[stream] = DbSync(config, o)
+                stream_to_sync[stream] = DbSync(target_config, o)
                 stream_to_sync[stream].create_schema_if_not_exists()
                 stream_to_sync[stream].sync_table()
                 row_count[stream] = 0
@@ -164,12 +162,12 @@ def main():
 
     if args.config:
         with open(args.config) as input:
-            config = json.load(input)
+            target_config = json.load(input)
     else:
-        config = {}
+        target_config = {}
 
     input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
-    state = persist_lines(config, input)
+    state = persist_lines(target_config, input)
 
     emit_state(state)
     logger.debug("Exiting normally")
