@@ -97,7 +97,7 @@ def most_general_type(types):
     return best_type
 
 
-def column_type(schema_property):
+def _column_type_generic(schema_property):
     property_format = schema_property['format'] if 'format' in schema_property else None
     types = schema_property['type']
     if isinstance(types, (str, bytes)):
@@ -114,6 +114,31 @@ def column_type(schema_property):
     if concrete_type not in JSONSCHEMA_TYPE_TO_POSTGRES_TYPE:
         concrete_type = 'string'
     return JSONSCHEMA_TYPE_TO_POSTGRES_TYPE[concrete_type]
+
+def _column_type_simple(schema_property):
+    property_type = schema_property['type']
+    property_format = schema_property['format'] if 'format' in schema_property else None
+    if 'object' in property_type or 'array' in property_type:
+        return 'jsonb'
+    elif property_format == 'date-time':
+        return 'timestamp with time zone'
+    elif property_format == 'date':
+        return 'date'
+    elif 'number' in property_type:
+        return 'numeric'
+    elif 'integer' in property_type and 'string' in property_type:
+        return 'character varying'
+    elif 'boolean' in property_type:
+        return 'boolean'
+    elif 'integer' in property_type:
+        return 'bigint'
+    else:
+        return 'character varying'
+
+def column_type(schema_property, use_simple: bool = True):
+    if use_simple:
+        return _column_type_simple(schema_property)
+    return _column_type_generic(schema_property)
 
 
 def inflect_name(name):
@@ -133,8 +158,11 @@ def safe_column_name(name):
     return '"{}"'.format(name)
 
 
-def column_clause(name, schema_property):
-    return '{} {}'.format(safe_column_name(name), column_type(schema_property))
+def column_clause(name, schema_property, use_simple_column_type: bool):
+    return '{} {}'.format(
+        safe_column_name(name),
+        column_type(schema_property, use_simple_column_type),
+    )
 
 
 def flatten_key(k, parent_key, sep):
@@ -217,19 +245,20 @@ def primary_column_names(stream_schema_message):
 
 
 class DbSync:
-    def __init__(self, connection_config, stream_schema_message):
-        self.connection_config = connection_config
-        self.schema_name = self.connection_config['schema']
+    def __init__(self, target_config, stream_schema_message):
+        self.target_config = target_config
+        self.use_simple_column_type = self.target_config.get('use_simple_column_type', True)
+        self.schema_name = self.target_config['schema']
         self.stream_schema_message = stream_schema_message
         self.flatten_schema = flatten_schema(stream_schema_message['schema'])
 
     def open_connection(self):
         conn_string = "host='{}' dbname='{}' user='{}' password='{}' port='{}'".format(
-            self.connection_config['host'],
-            self.connection_config['dbname'],
-            self.connection_config['user'],
-            self.connection_config['password'],
-            self.connection_config['port']
+            self.target_config['host'],
+            self.target_config['dbname'],
+            self.target_config['user'],
+            self.target_config['password'],
+            self.target_config['port']
         )
 
         return psycopg2.connect(conn_string)
@@ -274,7 +303,7 @@ class DbSync:
         flatten = flatten_record(record)
         for name, schema in self.flatten_schema.items():
             if flatten.get(name) is not None:
-                type = column_type(schema).lower()
+                type = column_type(schema, use_simple=self.use_simple_column_type).lower()
                 value = flatten[name]
                 if type == 'jsonb':
                     try:
@@ -376,7 +405,8 @@ class DbSync:
         columns = [
             column_clause(
                 name,
-                schema
+                schema,
+                use_simple_column_type=self.use_simple_column_type,
             )
             for (name, schema) in self.flatten_schema.items()
         ]
@@ -391,7 +421,7 @@ class DbSync:
         )
 
     def create_schema_if_not_exists(self):
-        schema_name = self.connection_config['schema']
+        schema_name = self.target_config['schema']
         schema_rows = self.query(
             'SELECT schema_name FROM information_schema.schemata WHERE schema_name = %s',
             (schema_name,)
@@ -420,7 +450,8 @@ class DbSync:
         columns_to_add = [
             column_clause(
                 name,
-                properties_schema
+                properties_schema,
+                use_simple_column_type=self.use_simple_column_type,
             )
             for (name, properties_schema) in self.flatten_schema.items()
             if name.lower() not in columns_dict
@@ -429,19 +460,22 @@ class DbSync:
         for column in columns_to_add:
             self.add_column(column, stream)
 
-        columns_to_replace = [
-            (safe_column_name(name), column_clause(
-                name,
-                properties_schema
-            ))
-            for (name, properties_schema) in self.flatten_schema.items()
-            if name.lower() in columns_dict and
-               (columns_dict[name.lower()]['data_type'].lower() != column_type(properties_schema).lower()) and
-               # Do not drop the column if it used to not have a timezone, and we are adding one.
-               # This is done so we can migrate all timestamps to have a timezone.
-               not (columns_dict[name.lower()]['data_type'].lower() == 'timestamp without time zone' and
-                    column_type(properties_schema).lower() == 'timestamp with time zone')
-        ]
+        columns_to_replace = []
+        for (name, properties_schema) in self.flatten_schema.items():
+            name_lower = name.lower()
+            col_type = column_type(properties_schema, use_simple=self.use_simple_column_type).lower()
+            col_data_type = columns_dict[name_lower]['data_type'].lower()
+            if name_lower in columns_dict and col_data_type != col_type and (
+                # Do not drop the column if it used to not have a timezone, and we are adding one.
+                # This is done so we can migrate all timestamps to have a timezone.
+                not (col_data_type == 'timestamp without time zone' and col_type == 'timestamp with time zone')
+            ):
+                columns_to_replace.append(
+                    (
+                        safe_column_name(name),
+                        column_clause(name, properties_schema, use_simple_column_type=self.use_simple_column_type)
+                    )
+                )
 
         for (column_name, column) in columns_to_replace:
             self.drop_column(column_name, stream)

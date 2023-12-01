@@ -71,8 +71,26 @@ def dbsync_class():
     ],
     ids=repr
 )
-def test_column_type(prop: dict, expected: str):
-    assert column_type(prop) == expected
+def test_column_type_generic(prop: dict, expected: str):
+    assert column_type(prop, use_simple=False) == expected
+
+@pytest.mark.parametrize(
+    'prop,expected',
+    [
+        ({'type': ['object'], 'format': 'date-time'}, 'jsonb'),
+        ({'type': ['array']}, 'jsonb'),
+        ({'type': ['object', 'array'], 'format': 'date-time'}, 'jsonb'),
+        ({'type': ['string'], 'format': 'date-time'}, 'timestamp with time zone'),
+        ({'type': ['boolean', 'integer', 'number'], 'format': 'date'}, 'date'),
+        ({'type': ['boolean', 'integer', 'number']}, 'numeric'),
+        ({'type': ['integer', 'string']}, 'character varying'),
+        ({'type': ['boolean', 'integer']}, 'boolean'),
+        ({'type': ['integer']}, 'bigint'),
+        ({'type': ['string']}, 'character varying'),
+    ]
+)
+def test_column_type_simple(prop: dict, expected: str):
+    assert column_type(prop, use_simple=True) == column_type(prop) == expected
 
 @pytest.mark.parametrize(
     'additional_prop_kwargs,expected',
