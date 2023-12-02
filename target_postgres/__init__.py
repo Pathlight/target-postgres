@@ -61,12 +61,19 @@ def persist_lines(target_config, lines):
 
     # Loop over lines from stdin
     for line in lines:
+        line = sanitize_line(line)
+        escaped_line = INVALID_ESCAPE_PATTERN.sub('', line)
         try:
-            line = sanitize_line(line)
-            o = json.loads(INVALID_ESCAPE_PATTERN.sub('', line))
+            # Try to see if removing invalid escapes from the line makes it parseable
+            o = json.loads(escaped_line)
+            line = escaped_line
         except json.decoder.JSONDecodeError:
-            logger.error("Unable to parse: {}".format(line))
-            raise
+            try:
+                # Try to decode it the line without escaping
+                o = json.loads(line)
+            except json.decoder.JSONDecodeError:
+                logger.error("Unable to parse: {}".format(line))
+                raise
 
         if 'type' not in o:
             raise Exception("Line is missing required key 'type': {}".format(line))
