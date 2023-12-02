@@ -29,7 +29,7 @@ INVALID_ESCAPE_PATTERN = re.compile(r'\\[^"\\/bfnrtu]')
 
 
 def sanitize_line(line):
-    return INVALID_ESCAPE_PATTERN.sub('', SANITIZE_RE.sub('', line))
+    return SANITIZE_RE.sub('', line)
 
 
 
@@ -61,11 +61,11 @@ def persist_lines(target_config, lines):
 
     # Loop over lines from stdin
     for line in lines:
-        line = sanitize_line(line)
         try:
+            line = INVALID_ESCAPE_PATTERN.sub('', sanitize_line(line))
             o = json.loads(line)
         except json.decoder.JSONDecodeError:
-            logger.error("Unable to parse:\n{}".format(line))
+            logger.error("Unable to parse: {}".format(line))
             raise
 
         if 'type' not in o:
