@@ -173,7 +173,7 @@ def main():
     else:
         target_config = {}
 
-    input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+    input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8', errors='replace')
     state = persist_lines(target_config, input)
 
     emit_state(state)
