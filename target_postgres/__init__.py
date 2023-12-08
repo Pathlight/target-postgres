@@ -46,7 +46,7 @@ def new_csv_file_entry():
         TemporaryFile(mode='w+b'),
         newline='\n',
         encoding='UTF-8',
-        errors='surrogatepass'
+        errors='replace'
     )
     writer = csv.writer(csv_f)
     return {'file': csv_f, 'writer': writer}
