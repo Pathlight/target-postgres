@@ -80,10 +80,11 @@ def persist_lines(target_config, lines):
                 logger.error("Unable to parse: {}".format(line))
                 raise
 
-        if 'type' not in o:
-            raise Exception("Line is missing required key 'type': {}".format(line))
-        t = o['type']
+        if not isinstance(o, dict):
+            logger.warning(f"The line is not a dictionary, perhaps stray print? {line}")
+            continue
 
+        t = o.get('type')
         if t == 'RECORD':
             if 'stream' not in o:
                 raise Exception("Line is missing required key 'stream': {}".format(line))
